@@ -1,0 +1,7 @@
+[package]
+name = "runshapr"
+version = "0.1.0"
+authors = ["Peter Elmers <peter.elmers@yahoo.com>"]
+
+[dependencies]
+xml-rs = "0.4"
