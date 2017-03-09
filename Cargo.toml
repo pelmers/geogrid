@@ -4,4 +4,7 @@ version = "0.1.0"
 authors = ["Peter Elmers <peter.elmers@yahoo.com>"]
 
 [dependencies]
-xml-rs = "0.4"
+quick-xml = "0.6.2"
+stopwatch = "0.0.7"
+imagefmt = "4.0.0"
+rayon = "0.6.0"
