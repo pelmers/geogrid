@@ -56,6 +56,25 @@ pub fn build_square(s: usize) -> Vec<Vec<bool>> {
 /// Write given i32 matrix to an image at requested path.
 /// If scale, then interpolate all display values linearly to the range [0, 255].
 /// Otherwise just truncate excess values to range [0, 255].
+pub fn bmat_to_img<P: AsRef<Path>, Matrix: AsRef<[Row]>, Row: AsRef<[bool]>>(t: Matrix, p: P) {
+    // Normalize to range 0, 255.
+    let t = t.as_ref();
+    let m = t.len();
+    let n = t[0].as_ref().len();
+    // make sure range >= 1 to avoid divide by zero later.
+    let mut bytes = vec![0u8; m*n];
+    for i in 0..m {
+        for j in 0..n {
+            bytes[i*n + j] = if t[i].as_ref()[j] { 255 } else { 0 };
+        }
+    }
+    imagefmt::write(p, n, m, ColFmt::Y, &bytes, ColType::Auto).expect("Error writing image file");
+}
+
+
+/// Write given i32 matrix to an image at requested path.
+/// If scale, then interpolate all display values linearly to the range [0, 255].
+/// Otherwise just truncate excess values to range [0, 255].
 pub fn mat_to_img<P: AsRef<Path>, Matrix: AsRef<[Row]>, Row: AsRef<[i32]>>(t: Matrix, p: P, scale: bool) {
     // Normalize to range 0, 255.
     let t = t.as_ref();
@@ -121,7 +140,6 @@ pub fn dist_transform<Matrix: AsRef<[Row]>, Row: AsRef<[bool]>>(t: Matrix) -> Ve
 /// Match provided mask matrix on provided distance transform matrix.
 /// dt and mask matrices are read from in parallel.
 /// Return score of match at each square.
-/// Caveat: mask dimensions must be odd.
 pub fn match_shape<IMatrix: AsRef<[IRow]>+Sync, IRow: AsRef<[i32]>+Sync,
                    BMatrix: AsRef<[BRow]>+Sync, BRow: AsRef<[bool]>+Sync>
                    (dt: IMatrix, mask: BMatrix) -> Vec<Vec<i32>>
@@ -129,27 +147,36 @@ pub fn match_shape<IMatrix: AsRef<[IRow]>+Sync, IRow: AsRef<[i32]>+Sync,
     let dt = dt.as_ref();
     let m = dt.len();
     let n = dt[0].as_ref().len();
-    let s = (mask.as_ref().len() - 1) / 2;
-    let t = (mask.as_ref()[0].as_ref().len() - 1) / 2;
+    let s = mask.as_ref().len();
+    let t = mask.as_ref()[0].as_ref().len();
     let cm = vec![vec![std::i32::MAX; n]; m];
-    let row_slice: Vec<usize> = (s..m-s).collect();
+    let row_slice: Vec<usize> = (0..m-s).collect();
     row_slice.par_iter().for_each(|&i| {
         let ptr = cm[i].as_ptr() as *mut i32;
-        for j in t..n-t {
+        for j in 0..n-t {
             unsafe {
                 *(ptr).offset(j as isize) = mask.as_ref().iter().enumerate()
                     .flat_map(|(x, row)| row.as_ref().iter().enumerate()
                               .map(move |(y, v)| (x, y, v)))
-                    .filter(|&(_, _, v)| *v).map(|(x, y, _)| dt[i+x-s].as_ref()[j+y-t]).sum();
+                    .filter(|&(_, _, v)| *v).map(|(x, y, _)| dt[i+x].as_ref()[j+y]).sum();
             }
         }
     });
     cm
 }
 
+pub fn trace_shape<BMatrix: AsRef<[BRow]>+Sync, BRow: AsRef<[bool]>+Sync>(shape: BMatrix, topleft: (usize, usize)) -> Vec<(usize, usize)> {
+    let (a, b) = topleft;
+    shape.as_ref().iter().enumerate().flat_map(|(x, r)| r.as_ref().iter().enumerate()
+                                                         .map(move |(y, v)| (x, y, v)))
+         .filter(|&(_, _, v)| *v).map(|(x, y, _)| (x + a, y + b)).collect()
+}
+
 /// Return i, j index pair in integer matrix t with lowest value.
 pub fn min_idx<Matrix: AsRef<[Row]>, Row: AsRef<[i32]>>(t: Matrix) -> (usize, usize) {
-    t.as_ref().iter().enumerate().flat_map(|(x, row)| row.as_ref().iter().enumerate().map(move |(y, v)| (x, y, v))).min_by_key(|&(_, _, v)| *v).map(|(x, y, _)| (x, y)).unwrap()
+    t.as_ref().iter().enumerate().flat_map(|(x, row)| row.as_ref().iter().enumerate()
+                                                         .map(move |(y, v)| (x, y, v)))
+     .min_by_key(|&(_, _, v)| *v).map(|(x, y, _)| (x, y)).unwrap()
 }
 
 fn main() {
@@ -256,16 +283,24 @@ fn main() {
     println!("Grid construction took {} ms", s.elapsed_ms());
     println!("Grid size: {} x {} = {}", grid.len(), grid[0].len(), grid.len() * grid[0].len());
     println!("Grid density: {}%", 100.0*(count as f32) / (grid.len() * grid[0].len()) as f32);
+    bmat_to_img(&grid, "grid_mat.png");
     s.restart();
     let dt = dist_transform(&grid);
     println!("Distance transform took {} ms", s.elapsed_ms());
     mat_to_img(&dt, "dt_mat.png", true);
     println!("Max distance: {}", dt.iter().map(|r| r.iter().max().unwrap()).max().unwrap());
     s.restart();
-    let mask = build_square(31);
-    let cm = match_shape(dt, mask);
+    let mask = build_square(63);
+    let cm = match_shape(&dt, &mask);
     println!("Shape match took {} ms", s.elapsed_ms());
     mat_to_img(&cm, "cm_mat.png", false);
     let (xp, yp) = min_idx(&cm);
     println!("Found match {} at ({}, {})", cm[xp][yp], xp, yp);
+    // The number of degrees each lat/lon on the grid spans in the real map.
+    let lat_per_grid = lat_div_size / lat_len;
+    let lon_per_grid = lon_div_size / lon_len;
+    for (x, y) in trace_shape(&mask, (xp, yp)) {
+        print!("({}, {}), ", lat_max - lat_per_grid * (x as f32), lon_per_grid * (y as f32) + lon_min);
+    }
+    println!("");
 }
