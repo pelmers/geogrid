@@ -69,6 +69,12 @@ impl GeoGrid {
         (self.res_lat, self.res_lon)
     }
 
+    /// Return a pair of latitude/longitude pairs that represent the northwest and southeast
+    /// corners of the bounding box covered by the grid.
+    pub fn bbox(&self) -> ((f32, f32), (f32, f32)) {
+        ((self.max_lat, self.min_lon), (self.min_lat, self.max_lon))
+    }
+
     /// Grid dimensions.
     pub fn size(&self) -> (usize, usize) {
         (self.grid_height, self.grid_width)
@@ -87,6 +93,21 @@ impl GeoGrid {
     /// Access the underlying grid.
     pub fn grid(&self) -> &[u8] {
         &self.grid[..]
+    }
+
+    /// Trace provided shape from given top left index, returning locations of all the true cells.
+    pub fn trace_shape<BMatrix: AsRef<[BRow]>, BRow: AsRef<[bool]>>(&self, shape: BMatrix, topleft: usize) -> Vec<usize> {
+        shape.as_ref().iter().enumerate().flat_map(|(x, r)| r.as_ref().iter().enumerate()
+                                                   .map(move |(y, v)| (x, y, v)))
+            .filter(|&(_, _, v)| *v).map(|(x, y, _)| topleft + x * self.grid_width + y).collect()
+    }
+
+    /// Return lat, lon coordinates of given index in the grid.
+    pub fn to_lat_lon(&self, idx: usize) -> (f32, f32) {
+        let (lat_len, lon_len) = lat_lon((self.min_lat + self.max_lat) / 2.0);
+        let row = (idx / self.grid_width) as f32;
+        let col = (idx % self.grid_width) as f32;
+        (self.max_lat - row * self.res_lat / lat_len, self.min_lon + col * self.res_lon / lon_len)
     }
 
     /// Compute L1 distance transform of t matrix.

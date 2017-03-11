@@ -78,13 +78,6 @@ pub fn match_shape<BMatrix: AsRef<[BRow]>+Sync, BRow: AsRef<[bool]>+Sync>
     cm
 }
 
-pub fn trace_shape<BMatrix: AsRef<[BRow]>+Sync, BRow: AsRef<[bool]>+Sync>(shape: BMatrix, topleft: (usize, usize)) -> Vec<(usize, usize)> {
-    let (a, b) = topleft;
-    shape.as_ref().iter().enumerate().flat_map(|(x, r)| r.as_ref().iter().enumerate()
-                                                         .map(move |(y, v)| (x, y, v)))
-         .filter(|&(_, _, v)| *v).map(|(x, y, _)| (x + a, y + b)).collect()
-}
-
 pub fn min_idx<T: Ord+Num>(t: &[T]) -> Option<(usize, &T)> {
     t.iter().enumerate().min_by_key(|&(_, v)| v)
 }
@@ -109,12 +102,9 @@ fn main() {
     mat_to_img(&cm, grid.size(), "cm_mat.png", Some((0, 200)));
     if let Some((idx, v)) = min_idx(&cm) {
         println!("Found match {} at {}", v, idx);
+        for (x, y) in grid.trace_shape(&mask, idx).iter().map(|&i| grid.to_lat_lon(i)) {
+            print!("({}, {}) ", x, y);
+        }
     }
-    //// The number of degrees each lat/lon on the grid spans in the real map.
-    //let lat_per_grid = lat_div_size / lat_len;
-    //let lon_per_grid = lon_div_size / lon_len;
-    //for (x, y) in trace_shape(&mask, (xp, yp)) {
-    //    print!("({}, {}), ", lat_max - lat_per_grid * (x as f32), lon_per_grid * (y as f32) + lon_min);
-    //}
-    //println!("");
+    println!();
 }
