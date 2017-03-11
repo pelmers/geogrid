@@ -1,4 +1,12 @@
+extern crate num;
+extern crate imagefmt;
+
 use std::f32;
+use std::path::Path;
+
+use imagefmt::ColFmt;
+use imagefmt::ColType;
+use num::{Num, ToPrimitive};
 
 /// Compute the length in meters of one degree latitude and longitude at given latitude degree.
 pub fn lat_lon(lat: f32) -> (f32, f32) {
@@ -16,6 +24,30 @@ pub fn lat_lon(lat: f32) -> (f32, f32) {
     let latlen = m1 + (m2 * (2.0 * lat).cos()) + (m3 * (4.0 * lat).cos()) + (m4 * (6.0 * lat).cos());
     let longlen = (p1 * lat.cos()) + (p2 * (3.0 * lat).cos()) + (p3 * (5.0 * lat).cos());
     (latlen, longlen)
+}
+
+/// Write given 2D numerical matrix to a grayscale image at requested path.
+pub fn mat_to_img<T: Clone+Ord+Num+ToPrimitive, P: AsRef<Path>>
+                 (t: &[T], dim: (usize, usize), p: P, clip: Option<(T, T)>) {
+    // Normalize to range 0, 255.
+    let (m, n) = dim;
+    let (min, max) = {
+        let min = t.iter().min().expect("Could not find minimum value.");
+        let max = t.iter().max().expect("Could not find maximum value.");
+        if let Some((lo, hi)) = clip {
+            (std::cmp::max(min, &lo).to_f64().unwrap(),
+             std::cmp::min(max, &hi).to_f64().unwrap())
+        } else {
+            (min.to_f64().unwrap(), max.to_f64().unwrap())
+        }
+    };
+    // make sure range >= 1 to avoid divide by zero later.
+    let range = if max > min { max - min } else { 1.0 };
+    let bytes = t.iter().map(|v| v.to_f64().expect("Cast to f64 failed."))
+                        .map(|v| if v < min { min } else if v > max { max } else { v })
+                        .map(|v| (255.0 * (v + min) / range) as u8)
+                        .collect::<Vec<u8>>();
+    imagefmt::write(p, n, m, ColFmt::Y, &bytes, ColType::Auto).expect("Error writing image file");
 }
 
 #[derive(Debug, Copy, Clone)]

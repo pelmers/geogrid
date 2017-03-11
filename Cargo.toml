@@ -6,7 +6,14 @@ authors = ["Peter Elmers <peter.elmers@yahoo.com>"]
 [dependencies]
 quick-xml = "0.6.2"
 stopwatch = "0.0.7"
-imagefmt = "4.0.0"
 rayon = "0.6.0"
 num = "0.1.37"
 geogrid = { path = "geogrid" }
+
+[lib]
+name = "osmlib"
+path = "src/lib.rs"
+
+[[bin]]
+name = "osmgrid"
+path = "src/main.rs"
