@@ -2,15 +2,25 @@ extern crate stopwatch;
 
 extern crate geogrid;
 extern crate osmlib;
+extern crate bzip2;
 
 use stopwatch::Stopwatch;
+use std::fs::File;
+use std::io::BufReader;
 
+use bzip2::read::BzDecoder;
 use geogrid::mat_to_img;
 use osmlib::*;
 
 fn main() {
     let mut s = Stopwatch::start_new();
-    let nodes = osm_to_nodes(&std::env::args().nth(1).unwrap());
+    let filename = std::env::args().nth(1).unwrap();
+    let file = File::open(&filename).unwrap();
+    let nodes = if filename.ends_with(".bz2") {
+        osm_to_nodes(BufReader::new(BzDecoder::new(BufReader::new(file))))
+    } else {
+        osm_to_nodes(BufReader::new(file))
+    };
     println!("XML parse took {} ms, found {} nodes", s.elapsed_ms(), nodes.len());
     s.restart();
     let grid = geogrid::new(&nodes, (15.0, 15.0));

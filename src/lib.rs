@@ -4,9 +4,9 @@ extern crate quick_xml;
 extern crate rayon;
 
 use std::collections::HashMap;
-use std::path::Path;
 use std::str::FromStr;
 use std::str::from_utf8;
+use std::io::BufRead;
 
 use num::Num;
 use quick_xml::reader::Reader;
@@ -58,8 +58,8 @@ pub fn min_idx<T: Ord+Num>(t: &[T]) -> Option<(usize, &T)> {
     t.iter().enumerate().min_by_key(|&(_, v)| v)
 }
 
-pub fn osm_to_nodes<P: AsRef<Path>>(f: P) -> Vec<Node> {
-    let mut r = Reader::from_file(f).unwrap();
+pub fn osm_to_nodes<R: BufRead>(r: R) -> Vec<Node> {
+    let mut r = Reader::from_reader(r);
     let mut nodes = HashMap::new();
     let mut ways = HashMap::new();
     let mut nd_vec = Vec::new();

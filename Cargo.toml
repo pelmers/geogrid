@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["Peter Elmers <peter.elmers@yahoo.com>"]
 
 [dependencies]
+bzip2 = "0.3.1"
 quick-xml = "0.6.2"
 stopwatch = "0.0.7"
 rayon = "0.6.0"
