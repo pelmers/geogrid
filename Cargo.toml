@@ -1,20 +1,13 @@
 [package]
-name = "runshapr"
+name = "geogrid"
 version = "0.1.0"
 authors = ["Peter Elmers <peter.elmers@yahoo.com>"]
 
 [dependencies]
-bzip2 = "0.3.1"
-quick-xml = "0.6.2"
-stopwatch = "0.0.7"
-rayon = "0.6.0"
+geojson = "0.5.0"
 num = "0.1.37"
-geogrid = { path = "geogrid" }
-
-[lib]
-name = "osmlib"
-path = "src/lib.rs"
-
-[[bin]]
-name = "osmgrid"
-path = "src/main.rs"
+imagefmt = "4.0.0"
+rayon = "0.6.0"
+serde = "0.9"
+serde_json = "0.9"
+serde_derive = "0.9"

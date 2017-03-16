@@ -1,8 +1,0 @@
-[package]
-name = "geogrid"
-version = "0.1.0"
-authors = ["Peter Elmers <peter.elmers@yahoo.com>"]
-
-[dependencies]
-num = "0.1.37"
-imagefmt = "4.0.0"
