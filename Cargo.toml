@@ -2,6 +2,11 @@
 name = "geogrid"
 version = "0.1.0"
 authors = ["Peter Elmers <peter.elmers@yahoo.com>"]
+description = "Manipulate geographic data on a grid."
+license = "mit"
+documentation = "https://docs.rs/geogrid"
+homepage = "https://github.com/pelmers/geogrid"
+repository = "https://github.com/pelmers/geogrid"
 
 [dependencies]
 geojson = "0.5.0"
