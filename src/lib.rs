@@ -3,16 +3,22 @@ extern crate num;
 extern crate rayon;
 extern crate serde_json;
 extern crate imagefmt;
-#[macro_use] extern crate serde_derive;
+extern crate ocl;
+#[macro_use]
+extern crate serde_derive;
 
 use std::{f32, i32, cmp};
 
 mod types;
 pub use types::*;
+mod match_shape;
 pub mod util;
 use util::{lat_lon, node_bounds};
 
 
+/// `GeoGrid` represents some portion of a geographic map as a grid. The grid computes step size
+/// from the center of the bounds. Because earth is not flat there will be some distance distortion
+/// farther from the central latitude if the grid is spread over a large area.
 #[derive(Clone)]
 pub struct GeoGrid {
     bounds: Bounds,
@@ -20,7 +26,7 @@ pub struct GeoGrid {
     res_lon: f32,
     grid_height: usize,
     grid_width: usize,
-    grid: Vec<u8>
+    grid: Vec<u8>,
 }
 
 #[inline]
@@ -30,9 +36,6 @@ fn mark_point(buf: &mut [u8], row: f32, col: f32, width: usize) {
 }
 
 // TODO: impl indexing trait
-/// GeoGrid represents some portion of a geographic map as a grid. The grid computes step size from
-/// the center of the bounds. Because earth is not flat there will be some distance distortion
-/// farther from the central latitude if the grid is spread over a large area.
 impl GeoGrid {
     /// Construct a GeoGrid from a slice of roads, where each road is a slice of nodes. This
     /// constructor will interpolate linearly between nodes within each row to set to 1. The grid's
@@ -40,7 +43,8 @@ impl GeoGrid {
     /// pair of (height, width) of the grid in pixels. If scale is true, then the aspect ratio of
     /// the original map will be maintained, potentially reducing one of the resolution dimensions.
     /// Otherwise, with scale false, the grid will stretch to the provided resolution.
-    pub fn from_roads<NMatrix: AsRef<[NRow]>+Sync, NRow: AsRef<[Node]>+Sync>(roads: NMatrix, resolution: (usize, usize), scale: bool) -> GeoGrid {
+    pub fn from_roads<NMatrix: AsRef<[NRow]>+Sync, NRow: AsRef<[Node]>+Sync>
+        (roads: NMatrix, resolution: (usize, usize), scale: bool) -> GeoGrid {
         let roads = roads.as_ref();
 
         // TODO: factor out with from_nodes
@@ -63,10 +67,12 @@ impl GeoGrid {
         for r in roads {
             let r = r.as_ref();
             for (a, b) in r.iter().zip(r.iter().skip(1)) {
-                let a_row = (bounds.north - a.lat) / bounds.range_lat() * ((grid_height - 1) as f32);
-                let a_col = (a.lon - bounds.west) / bounds.range_lon() * ((grid_width - 1)  as f32);
-                let b_row = (bounds.north - b.lat) / bounds.range_lat() * ((grid_height - 1) as f32);
-                let b_col = (b.lon - bounds.west) / bounds.range_lon() * ((grid_width - 1)  as f32);
+                let a_row = (bounds.north - a.lat) / bounds.range_lat() *
+                            ((grid_height - 1) as f32);
+                let a_col = (a.lon - bounds.west) / bounds.range_lon() * ((grid_width - 1) as f32);
+                let b_row = (bounds.north - b.lat) / bounds.range_lat() *
+                            ((grid_height - 1) as f32);
+                let b_col = (b.lon - bounds.west) / bounds.range_lon() * ((grid_width - 1) as f32);
                 let max_abs_diff = f32::max((b_row - a_row).abs(), (b_col - a_col).abs());
                 if max_abs_diff == 0.0 {
                     // Sometimes the data puts two nodes at the same point.
@@ -88,14 +94,23 @@ impl GeoGrid {
                 }
             }
             // Now mark the final point in the road, which is skipped in the zip iteration above.
-            if r.len() > 0 {
+            if !r.is_empty() {
                 let last = r[r.len() - 1];
-                let l_row = (bounds.north - last.lat) / bounds.range_lat() * ((grid_height - 1) as f32);
-                let l_col = (last.lon - bounds.west) / bounds.range_lon() * ((grid_width - 1)  as f32);
+                let l_row = (bounds.north - last.lat) / bounds.range_lat() *
+                            ((grid_height - 1) as f32);
+                let l_col = (last.lon - bounds.west) / bounds.range_lon() *
+                            ((grid_width - 1) as f32);
                 mark_point(&mut grid, l_row, l_col, grid_width);
             }
         }
-        GeoGrid{ bounds, res_lat, res_lon, grid_height, grid_width, grid }
+        GeoGrid {
+            bounds: bounds,
+            res_lat: res_lat,
+            res_lon: res_lon,
+            grid_height: grid_height,
+            grid_width: grid_width,
+            grid: grid,
+        }
     }
     /// Construct a GeoGrid from provided slice of nodes using given resolution, expressed in units
     /// of (meters latitude per grid unit, meters longitude per grid unit).
@@ -111,11 +126,18 @@ impl GeoGrid {
         let mut grid = vec![0; grid_height*grid_width];
         for n in nodes {
             let grid_lat = (bounds.north - n.lat) / bounds.range_lat() * ((grid_height - 1) as f32);
-            let grid_lon = (n.lon - bounds.west) / bounds.range_lon() * ((grid_width - 1)  as f32);
+            let grid_lon = (n.lon - bounds.west) / bounds.range_lon() * ((grid_width - 1) as f32);
             grid[(grid_lat.round() as usize) * grid_width + (grid_lon.round() as usize)] = 1;
         }
 
-        GeoGrid{ bounds, res_lat, res_lon, grid_height, grid_width, grid }
+        GeoGrid {
+            bounds: bounds,
+            res_lat: res_lat,
+            res_lon: res_lon,
+            grid_height: grid_height,
+            grid_width: grid_width,
+            grid: grid,
+        }
     }
 
     /// Grid resolution, in meters per row and meters per column.
@@ -144,6 +166,12 @@ impl GeoGrid {
         self.grid.len()
     }
 
+    /// Grid is 0x0.
+    pub fn is_empty(&self) -> bool {
+        self.grid.is_empty()
+    }
+
+
     /// Clears the grid, but leaves all other fields intact. Maybe useful to save memory if you
     /// only need the distance transform and not the original grid.
     pub fn clear_grid(&mut self) {
@@ -168,10 +196,22 @@ impl GeoGrid {
 
 
     /// Trace provided shape from given top left index, returning locations of all the true cells.
-    pub fn trace_shape<BMatrix: AsRef<[BRow]>, BRow: AsRef<[bool]>>(&self, shape: BMatrix, topleft: usize) -> Vec<usize> {
-        shape.as_ref().iter().enumerate().flat_map(|(x, r)| r.as_ref().iter().enumerate()
-                                                   .map(move |(y, v)| (x, y, v)))
-            .filter(|&(_, _, v)| *v).map(|(x, y, _)| topleft + x * self.grid_width + y).collect()
+    pub fn trace_shape<BMatrix: AsRef<[BRow]>, BRow: AsRef<[bool]>>(&self,
+                                                                    shape: BMatrix,
+                                                                    topleft: usize)
+                                                                    -> Vec<usize> {
+        shape.as_ref()
+            .iter()
+            .enumerate()
+            .flat_map(|(x, r)| {
+                r.as_ref()
+                    .iter()
+                    .enumerate()
+                    .map(move |(y, v)| (x, y, v))
+            })
+            .filter(|&(_, _, v)| *v)
+            .map(|(x, y, _)| topleft + x * self.grid_width + y)
+            .collect()
     }
 
     /// Return lat, lon coordinates of given index in the grid.
@@ -179,11 +219,12 @@ impl GeoGrid {
         let (lat_len, lon_len) = lat_lon((self.bounds.south + self.bounds.north) / 2.0);
         let row = (idx / self.grid_width) as f32;
         let col = (idx % self.grid_width) as f32;
-        (self.bounds.north - row * self.res_lat / lat_len, self.bounds.west + col * self.res_lon / lon_len)
+        (self.bounds.north - row * self.res_lat / lat_len,
+         self.bounds.west + col * self.res_lon / lon_len)
     }
 
     /// Return closest index in grid to given latitude, longitude.
-    pub fn from_lat_lon(&self, lat: f32, lon: f32) -> usize {
+    pub fn near_lat_lon(&self, lat: f32, lon: f32) -> usize {
         let (ra, ri) = self.degree_resolution();
         let lat_offset = ((self.bounds.north - lat) / ra).round() as usize;
         let lon_offset = ((lon - self.bounds.west) / ri).round() as usize;
@@ -192,7 +233,12 @@ impl GeoGrid {
 
     /// Return start index and a new size of a bounded subgrid specified by given rectangle in
     /// degrees.
-    pub fn bounded_subgrid(&self, north: f32, south: f32, east: f32, west: f32) -> (usize, (usize, usize)) {
+    pub fn bounded_subgrid(&self,
+                           north: f32,
+                           south: f32,
+                           east: f32,
+                           west: f32)
+                           -> (usize, (usize, usize)) {
         // TODO: guarantee valid subgrid boundaries
         let (ra, ri) = self.degree_resolution();
         let lat_start = ((self.bounds.north - north) / ra).round() as usize;
@@ -211,8 +257,8 @@ impl GeoGrid {
         for i in 0..m {
             let off = i * n;
             for j in 0..n {
-                if self.grid[off+j] > 0 {
-                    dt[off+j] = 0;
+                if self.grid[off + j] > 0 {
+                    dt[off + j] = 0;
                 } else {
                     // Let val be min of current, (left, and above) + 1
                     let mut val = dt[off + j];
@@ -222,7 +268,7 @@ impl GeoGrid {
                     if i > 0 {
                         val = cmp::min(val, dt[off - n + j] + 1);
                     }
-                    dt[off+j] = val;
+                    dt[off + j] = val;
                 }
             }
         }
@@ -244,4 +290,3 @@ impl GeoGrid {
         dt
     }
 }
-

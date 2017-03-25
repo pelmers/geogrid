@@ -2,7 +2,7 @@
 #[derive(Debug, Copy, Clone)]
 pub struct Node {
     pub lat: f32,
-    pub lon: f32
+    pub lon: f32,
 }
 
 /// Represent some map bounds, generally in degrees.
@@ -11,7 +11,7 @@ pub struct Bounds {
     pub north: f32,
     pub south: f32,
     pub east: f32,
-    pub west: f32
+    pub west: f32,
 }
 
 impl Bounds {
@@ -22,5 +22,3 @@ impl Bounds {
         self.east - self.west
     }
 }
-
-

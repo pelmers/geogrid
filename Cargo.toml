@@ -1,6 +1,6 @@
 [package]
 name = "geogrid"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Peter Elmers <peter.elmers@yahoo.com>"]
 description = "Manipulate geographic data on a grid."
 license = "MIT"
@@ -18,3 +18,5 @@ rayon = "0.6.0"
 serde = "0.9"
 serde_json = "0.9"
 serde_derive = "0.9"
+time = "0.1"
+ocl = "0.12"
