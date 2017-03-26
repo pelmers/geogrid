@@ -1,3 +1,5 @@
+#![feature(step_by)]
+
 extern crate geojson;
 extern crate num;
 extern crate rayon;

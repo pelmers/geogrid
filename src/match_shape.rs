@@ -3,66 +3,39 @@ use ocl::{Buffer, ProQue, Device};
 use std::{i32, cmp};
 use rayon::prelude::*;
 
-enum Processor {
+enum Processor<'a> {
     SingleCore,
     MultiCore,
-    GPU(Device),
+    GPU(&'a Device, usize),
 }
 
 static OCL_MATCH_KERNEL: &'static str = r#"
-    __kernel void match(__global int* sm, __global int* dt, __global int* cm,
-                        int grid_width, int sm_height, int sm_width) {
-        size_t i = get_global_id(0);
-        size_t j = get_global_id(1);
+    __kernel void match(__constant int* s_xs, __constant int* s_ys,
+                        const __global int* dt, __global int* cm, int grid_width, int s_len) {
+        int idx = get_global_id(0) * grid_width + get_global_id(1);
         int acc = 0;
-        for (int x = 0; x < sm_height; x++) {
-            int y = 0;
-            while (y < sm_width) {
-                int val = sm[x * sm_width + y];
-                if (val == 0) {
-                    acc += dt[(i + x) * grid_width + j + y];
-                    y += 1;
-                } else {
-                    y += val;
-                }
-            }
+        for (int k = 0; k < s_len; k++) {
+            acc += dt[idx + s_xs[k] * grid_width + s_ys[k]];
         }
-        if (acc < 0) {
-            // set to max int
-            acc = 2147483647;
-        }
-        cm[i * grid_width + j] = acc;
+        cm[idx] = acc;
     }
 "#;
 
 #[inline]
-fn match_kernel(i: usize, j: usize, grid_width: usize, sm: &[Vec<i32>], dt: &[i32]) -> i32 {
-    let t = sm[0].len();
-    let mut acc = 0;
-    for (x, s_row) in sm.iter().enumerate() {
-        let mut y = 0;
-        while y < t {
-            let val = s_row[y];
-            if val == 0 {
-                acc += dt[(i + x) * grid_width + j + y];
-                y += 1;
-            } else {
-                y += val as usize;
-            }
-        }
-    }
-    if acc < 0 {
-        // Then I suppose it overflowed, flip it back around.
-        acc = i32::MAX;
-    }
-    acc
+fn match_kernel(i: usize, j: usize, grid_width: usize, sp: &[(i32, i32)], dt: &[i32]) -> i32 {
+    let idx = i * grid_width + j;
+    sp.iter().map(|&(x, y)| dt[idx + x as usize * grid_width + y as usize]).sum()
 }
 
-impl Processor {
-    fn process(self, sm: &[Vec<i32>], dt: &[i32], dim: (usize, usize)) -> Vec<i32> {
+impl<'a> Processor<'a> {
+    fn process(self,
+               sm: &[(i32, i32)],
+               s_dim: (usize, usize),
+               dt: &[i32],
+               dim: (usize, usize))
+               -> Vec<i32> {
         let (m, n) = dim;
-        let s = sm.len();
-        let t = sm[0].len();
+        let (s, t) = s_dim;
         match self {
             Processor::SingleCore => {
                 let mut cm = vec![i32::MAX; n*m];
@@ -86,39 +59,49 @@ impl Processor {
                 });
                 cm
             }
-            Processor::GPU(specifier) => {
+            Processor::GPU(device, step_size) => {
                 // TODO: unwrap less
                 let mut cm = vec![i32::MAX; n*m];
-                let pro_que = ProQue::builder()
-                    .device(specifier)
-                    .src(OCL_MATCH_KERNEL)
-                    .dims((m, n))
-                    .build()
-                    .unwrap();
-                let flat_sm: Vec<_> = sm.iter().flat_map(|x| x.iter()).cloned().collect();
+                let (xs, ys): (Vec<i32>, Vec<i32>) = sm.iter().cloned().unzip();
+                let pro_que =
+                    ProQue::builder().device(device).src(OCL_MATCH_KERNEL).build().unwrap();
                 let queue = pro_que.queue();
-                let sm_buffer = Buffer::new(queue.clone(),
-                                            Some(core::MEM_READ_WRITE | core::MEM_COPY_HOST_PTR),
-                                            (s * t,),
-                                            Some(&flat_sm))
+                let d_dt = Buffer::new(queue.clone(),
+                                       Some(core::MEM_READ_ONLY | core::MEM_COPY_HOST_PTR),
+                                       (m * n,),
+                                       Some(dt))
                     .unwrap();
-                let dt_buffer = Buffer::new(queue.clone(),
-                                            Some(core::MEM_READ_WRITE | core::MEM_COPY_HOST_PTR),
-                                            (m * n,),
-                                            Some(dt))
+                let d_cm = Buffer::new(queue.clone(),
+                                       Some(core::MEM_READ_WRITE | core::MEM_COPY_HOST_PTR),
+                                       (m * n,),
+                                       Some(&cm))
                     .unwrap();
-                let cm_buffer: Buffer<i32> =
-                    Buffer::new(queue.clone(), Some(core::MEM_READ_WRITE), (m * n,), None).unwrap();
+                let d_xs = Buffer::new(queue.clone(),
+                                       Some(core::MEM_READ_ONLY | core::MEM_COPY_HOST_PTR),
+                                       (sm.len(),),
+                                       Some(&xs))
+                    .unwrap();
+                let d_ys = Buffer::new(queue.clone(),
+                                       Some(core::MEM_READ_ONLY | core::MEM_COPY_HOST_PTR),
+                                       (sm.len(),),
+                                       Some(&ys))
+                    .unwrap();
                 let kernel = pro_que.create_kernel("match")
                     .unwrap()
-                    .arg_buf_named("sm", Some(&sm_buffer))
-                    .arg_buf_named("dt", Some(&dt_buffer))
-                    .arg_buf_named("cm", Some(&cm_buffer))
+                    .arg_buf_named("s_xs", Some(&d_xs))
+                    .arg_buf_named("s_ys", Some(&d_ys))
+                    .arg_buf_named("dt", Some(&d_dt))
+                    .arg_buf_named("cm", Some(&d_cm))
                     .arg_scl_named("grid_width", Some(n))
-                    .arg_scl_named("sm_height", Some(s))
-                    .arg_scl_named("sm_width", Some(t));
-                kernel.enq().unwrap();
-                cm_buffer.read(&mut cm);
+                    .arg_scl_named("s_len", Some(sm.len()));
+                for offset in (0..m).step_by(step_size) {
+                    kernel.cmd()
+                        .gws((cmp::min(step_size, m - offset - s), n - t))
+                        .gwo((offset, 0))
+                        .enq()
+                        .unwrap();
+                }
+                d_cm.read(&mut cm).enq().unwrap();
                 queue.finish();
                 cm
             }
@@ -126,26 +109,19 @@ impl Processor {
     }
 }
 
-fn stride_mask<BMatrix: AsRef<[BRow]>, BRow: AsRef<[bool]>>(mask: BMatrix) -> Vec<Vec<i32>> {
-    let mask = mask.as_ref();
-    let m = mask.len();
-    if m == 0 {
-        return vec![vec![]];
-    }
-    let n = mask[0].as_ref().len();
-    let mut stride = vec![vec![0; n]; m];
-    for (r, row) in mask.iter().enumerate() {
-        let row = row.as_ref();
-        let mut last_set = row.len();
-        for (c, val) in row.iter().enumerate().rev() {
-            if *val {
-                last_set = c;
-            } else {
-                stride[r][c] = (last_set - c) as i32;
-            }
-        }
-    }
-    stride
+#[inline]
+fn shape_points<BMatrix: AsRef<[BRow]>, BRow: AsRef<[bool]>>(mask: BMatrix) -> Vec<(i32, i32)> {
+    mask.as_ref()
+        .iter()
+        .enumerate()
+        .flat_map(|(i, m)| {
+            m.as_ref()
+                .iter()
+                .enumerate()
+                .filter(|&(_, v)| *v)
+                .map(move |(j, _)| (i as i32, j as i32))
+        })
+        .collect()
 }
 
 
@@ -193,9 +169,13 @@ pub fn match_shape_slow<BMatrix: AsRef<[BRow]>, BRow: AsRef<[bool]>>(dt: &[i32],
 pub fn match_shape_ocl<BMatrix: AsRef<[BRow]>, BRow: AsRef<[bool]>>(dt: &[i32],
                                                                     dim: (usize, usize),
                                                                     mask: BMatrix,
-                                                                    device: Device)
+                                                                    device: &Device,
+                                                                    step_size: Option<usize>)
                                                                     -> Vec<i32> {
-    match_shape_generic(dt, dim, mask, Processor::GPU(device))
+    match_shape_generic(dt,
+                        dim,
+                        mask,
+                        Processor::GPU(device, step_size.unwrap_or(256)))
 }
 
 
@@ -207,8 +187,9 @@ fn match_shape_generic<BMatrix: AsRef<[BRow]>, BRow: AsRef<[bool]>>(dt: &[i32],
                                                                     mask: BMatrix,
                                                                     processor: Processor)
                                                                     -> Vec<i32> {
-    let sm = stride_mask(mask);
-    let mut cm = processor.process(&sm, dt, dim);
+    let sp_dim = (mask.as_ref().len(), mask.as_ref()[0].as_ref().len());
+    let sp = shape_points(mask);
+    let mut cm = processor.process(&sp, sp_dim, dt, dim);
     non_min_suppress(&mut cm, dim);
     cm
 }
