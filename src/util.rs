@@ -56,7 +56,7 @@ pub fn roads_from_json<R: Read>(reader: R, b: Option<Bounds>) -> Vec<Vec<Node>> 
     let mut nodes = Vec::with_capacity(2000);
     let b = match b {
         Some(b) => b,
-        None => node_bounds(::std::iter::empty()),
+        None => Bounds{north: f32::MAX, south: f32::MIN, east: f32::MAX, west: f32::MIN},
     };
     if let Ok(json) = ::serde_json::from_reader::<_, GeoJson>(reader) {
         if let GeoJson::FeatureCollection(ref roads) = json {
@@ -74,7 +74,7 @@ pub fn roads_from_json<R: Read>(reader: R, b: Option<Bounds>) -> Vec<Vec<Node>> 
                                 (b.north > n.lat) && (b.south < n.lat) && (b.east > n.lon) &&
                                 (b.west < n.lon)
                             })
-                            .collect())
+                            .collect());
                     }
                 }
             }
