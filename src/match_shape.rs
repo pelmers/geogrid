@@ -11,7 +11,8 @@ enum Processor<'a> {
 
 static OCL_MATCH_KERNEL: &'static str = r#"
     __kernel void match(__constant int* s_xs, __constant int* s_ys,
-                        const __global int* dt, __global int* cm, int grid_width, int s_len) {
+                        const __global int* dt, __global int* cm,
+                        const int grid_width, const int s_len) {
         int idx = get_global_id(0) * grid_width + get_global_id(1);
         int acc = 0;
         for (int k = 0; k < s_len; k++) {
@@ -92,14 +93,15 @@ impl<'a> Processor<'a> {
                     .arg_buf_named("s_ys", Some(&d_ys))
                     .arg_buf_named("dt", Some(&d_dt))
                     .arg_buf_named("cm", Some(&d_cm))
-                    .arg_scl_named("grid_width", Some(n))
-                    .arg_scl_named("s_len", Some(sm.len()));
-                for offset in (0..m).step_by(step_size) {
+                    .arg_scl_named("grid_width", Some(n as i32))
+                    .arg_scl_named("s_len", Some(sm.len() as i32));
+                for offset in (0..m - s).step_by(step_size) {
                     kernel.cmd()
                         .gws((cmp::min(step_size, m - offset - s), n - t))
                         .gwo((offset, 0))
                         .enq()
                         .unwrap();
+                    queue.finish();
                 }
                 d_cm.read(&mut cm).enq().unwrap();
                 queue.finish();

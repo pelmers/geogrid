@@ -62,7 +62,7 @@ fn bench_ocl(_: &mut Bencher) {
         for device in all_devices {
             let start = Instant::now();
             println!("{}", device.name());
-            let res = black_box(match_shape_ocl(&dt, (M, N), &sp, &device, Some(1024)));
+            let res = black_box(match_shape_ocl(&dt, (M, N), &sp, &device, Some(256)));
             println!("Time elapsed: {:.2} ms", dur_as_ms(start.elapsed()));
             println!("Verification: {:?}", &res[MID..MID + 8]);
         }
