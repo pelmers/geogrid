@@ -1,13 +1,13 @@
-#![feature(step_by)]
-
 extern crate geojson;
 extern crate num;
 extern crate rayon;
 extern crate serde_json;
 extern crate imagefmt;
-extern crate ocl;
 #[macro_use]
 extern crate serde_derive;
+
+#[cfg(feature="opencl")]
+extern crate ocl;
 
 use std::{f32, i32, cmp};
 

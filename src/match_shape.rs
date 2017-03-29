@@ -1,7 +1,12 @@
-use ocl::core;
-use ocl::{Buffer, ProQue, Device};
 use std::{i32, cmp};
 use rayon::prelude::*;
+
+#[cfg(feature="opencl")]
+use ocl::{core, Buffer, ProQue, Device};
+
+#[cfg(not(feature="opencl"))]
+/// Dummy unused class to compile when ocl is not available.
+struct Device {}
 
 enum Processor<'a> {
     SingleCore,
@@ -9,6 +14,7 @@ enum Processor<'a> {
     GPU(&'a Device, usize),
 }
 
+#[cfg(feature="opencl")]
 static OCL_MATCH_KERNEL: &'static str = r#"
     __kernel void match(__constant int* s_xs, __constant int* s_ys,
                         const __global int* dt, __global int* cm,
@@ -37,9 +43,9 @@ impl<'a> Processor<'a> {
                -> Vec<i32> {
         let (m, n) = dim;
         let (s, t) = s_dim;
+        let mut cm = vec![i32::MAX; n*m];
         match self {
             Processor::SingleCore => {
-                let mut cm = vec![i32::MAX; n*m];
                 for i in 0..m - s {
                     for j in 0..n - t {
                         cm[i * n + j] = match_kernel(i, j, n, sm, dt);
@@ -48,7 +54,6 @@ impl<'a> Processor<'a> {
                 cm
             }
             Processor::MultiCore => {
-                let cm = vec![i32::MAX; n*m];
                 (0..m - s).collect::<Vec<_>>().par_iter().for_each(|&i| {
                     // Get pointer to start of the i-th row.
                     unsafe {
@@ -61,53 +66,80 @@ impl<'a> Processor<'a> {
                 cm
             }
             Processor::GPU(device, step_size) => {
-                // TODO: unwrap less
-                let mut cm = vec![i32::MAX; n*m];
-                let (xs, ys): (Vec<i32>, Vec<i32>) = sm.iter().cloned().unzip();
-                let pro_que =
-                    ProQue::builder().device(device).src(OCL_MATCH_KERNEL).build().unwrap();
-                let queue = pro_que.queue();
-                let d_dt = Buffer::new(queue.clone(),
-                                       Some(core::MEM_READ_ONLY | core::MEM_COPY_HOST_PTR),
-                                       (m * n,),
-                                       Some(dt))
-                    .unwrap();
-                let d_cm = Buffer::new(queue.clone(),
-                                       Some(core::MEM_READ_WRITE | core::MEM_COPY_HOST_PTR),
-                                       (m * n,),
-                                       Some(&cm))
-                    .unwrap();
-                let d_xs = Buffer::new(queue.clone(),
-                                       Some(core::MEM_READ_ONLY | core::MEM_COPY_HOST_PTR),
-                                       (sm.len(),),
-                                       Some(&xs))
-                    .unwrap();
-                let d_ys = Buffer::new(queue.clone(),
-                                       Some(core::MEM_READ_ONLY | core::MEM_COPY_HOST_PTR),
-                                       (sm.len(),),
-                                       Some(&ys))
-                    .unwrap();
-                let kernel = pro_que.create_kernel("match")
-                    .unwrap()
-                    .arg_buf_named("s_xs", Some(&d_xs))
-                    .arg_buf_named("s_ys", Some(&d_ys))
-                    .arg_buf_named("dt", Some(&d_dt))
-                    .arg_buf_named("cm", Some(&d_cm))
-                    .arg_scl_named("grid_width", Some(n as i32))
-                    .arg_scl_named("s_len", Some(sm.len() as i32));
-                for offset in (0..m - s).step_by(step_size) {
-                    kernel.cmd()
-                        .gws((cmp::min(step_size, m - offset - s), n - t))
-                        .gwo((offset, 0))
-                        .enq()
-                        .unwrap();
-                    queue.finish();
-                }
-                d_cm.read(&mut cm).enq().unwrap();
-                queue.finish();
-                cm
+                Processor::process_opencl(device, step_size, dt, m, n, sm, s, t, cm)
             }
         }
+    }
+
+    #[cfg(not(feature="opencl"))]
+    fn process_opencl(_: &'a Device,
+                      _: usize,
+                      _: &[i32],
+                      _: usize,
+                      _: usize,
+                      _: &[(i32, i32)],
+                      _: usize,
+                      _: usize,
+                      cm: Vec<i32>)
+                      -> Vec<i32> {
+        cm
+    }
+
+    #[cfg(feature="opencl")]
+    fn process_opencl(device: &'a Device,
+                      step_size: usize,
+                      dt: &[i32],
+                      m: usize,
+                      n: usize,
+                      sm: &[(i32, i32)],
+                      s: usize,
+                      t: usize,
+                      mut cm: Vec<i32>)
+                      -> Vec<i32> {
+        // TODO: unwrap less
+        let (xs, ys): (Vec<i32>, Vec<i32>) = sm.iter().cloned().unzip();
+        let pro_que = ProQue::builder().device(device).src(OCL_MATCH_KERNEL).build().unwrap();
+        let queue = pro_que.queue();
+        let d_dt = Buffer::new(queue.clone(),
+                               Some(core::MEM_READ_ONLY | core::MEM_COPY_HOST_PTR),
+                               (m * n,),
+                               Some(dt))
+            .unwrap();
+        let d_cm = Buffer::new(queue.clone(),
+                               Some(core::MEM_READ_WRITE | core::MEM_COPY_HOST_PTR),
+                               (m * n,),
+                               Some(&cm))
+            .unwrap();
+        let d_xs = Buffer::new(queue.clone(),
+                               Some(core::MEM_READ_ONLY | core::MEM_COPY_HOST_PTR),
+                               (sm.len(),),
+                               Some(&xs))
+            .unwrap();
+        let d_ys = Buffer::new(queue.clone(),
+                               Some(core::MEM_READ_ONLY | core::MEM_COPY_HOST_PTR),
+                               (sm.len(),),
+                               Some(&ys))
+            .unwrap();
+        let kernel = pro_que.create_kernel("match")
+            .unwrap()
+            .arg_buf_named("s_xs", Some(&d_xs))
+            .arg_buf_named("s_ys", Some(&d_ys))
+            .arg_buf_named("dt", Some(&d_dt))
+            .arg_buf_named("cm", Some(&d_cm))
+            .arg_scl_named("grid_width", Some(n as i32))
+            .arg_scl_named("s_len", Some(sm.len() as i32));
+        for i in 0..(m - s) / step_size {
+            let offset = i * step_size;
+            kernel.cmd()
+                .gws((cmp::min(step_size, m - offset - s), n - t))
+                .gwo((offset, 0))
+                .enq()
+                .unwrap();
+            queue.finish();
+        }
+        d_cm.read(&mut cm).enq().unwrap();
+        queue.finish();
+        cm
     }
 }
 
@@ -168,6 +200,7 @@ pub fn match_shape_slow<BMatrix: AsRef<[BRow]>, BRow: AsRef<[bool]>>(dt: &[i32],
 /// Sequentially match provided mask matrix on provided distance transform matrix.
 /// Copies dt and mask matrices to specified GPU device.
 /// Return score of match at each square.
+#[cfg(feature="opencl")]
 pub fn match_shape_ocl<BMatrix: AsRef<[BRow]>, BRow: AsRef<[bool]>>(dt: &[i32],
                                                                     dim: (usize, usize),
                                                                     mask: BMatrix,

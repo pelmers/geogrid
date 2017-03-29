@@ -6,6 +6,8 @@ extern crate geogrid;
 
 use std::time::{Duration, Instant};
 use geogrid::util::*;
+
+#[cfg(feature="opencl")]
 use ocl::builders::DeviceSpecifier;
 
 #[cfg(test)]
@@ -15,6 +17,7 @@ const M: usize = 9000;
 const N: usize = M;
 const MID: usize = M * N / 2;
 const SHAPE_DIM: usize = 40;
+
 fn mock_shape(sz: usize) -> Vec<Vec<bool>> {
     let mut sp = vec![vec![false; sz]; sz];
     // Set some of them to true
@@ -53,6 +56,7 @@ fn bench_multicore(_: &mut Bencher) {
     println!("Verification: {:?}", &res[MID..MID + 8]);
 }
 
+#[cfg(feature="opencl")]
 #[bench]
 fn bench_ocl(_: &mut Bencher) {
     println!();

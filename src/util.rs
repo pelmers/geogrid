@@ -8,7 +8,9 @@ use num::{Num, ToPrimitive};
 use imagefmt::{ColFmt, ColType};
 use types::{Node, Bounds};
 
-pub use match_shape::{match_shape_ocl, match_shape_slow, match_shape};
+pub use match_shape::{match_shape_slow, match_shape};
+#[cfg(feature="opencl")]
+pub use match_shape::match_shape_ocl;
 
 
 /// Compute the length in meters of one degree latitude and longitude at given latitude degree.

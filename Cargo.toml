@@ -10,6 +10,10 @@ repository = "https://github.com/pelmers/geogrid"
 keywords = ["geography", "map", "cartography"]
 categories = ["data-structures"]
 
+[features]
+default = []
+opencl = []
+
 [dependencies]
 geojson = "0.5.0"
 num = "0.1.37"
