@@ -1,14 +1,12 @@
 #![feature(test)]
 extern crate test;
+#[cfg(feature="opencl")]
 extern crate ocl;
 
 extern crate geogrid;
 
 use std::time::{Duration, Instant};
 use geogrid::util::*;
-
-#[cfg(feature="opencl")]
-use ocl::builders::DeviceSpecifier;
 
 #[cfg(test)]
 use test::{Bencher, black_box};
@@ -59,6 +57,7 @@ fn bench_multicore(_: &mut Bencher) {
 #[cfg(feature="opencl")]
 #[bench]
 fn bench_ocl(_: &mut Bencher) {
+    use ocl::builders::DeviceSpecifier;
     println!();
     let sp = mock_shape(SHAPE_DIM);
     let dt = vec![2; M * N];
