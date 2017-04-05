@@ -44,7 +44,7 @@ fn match_singlecore(_: &mut Bencher) {
     let sp = mock_shape(SHAPE_DIM);
     let dt = mock_dt();
     let start = Instant::now();
-    let res = black_box(match_shape(&dt, (M, N), &sp, 1, SingleCore));
+    let res = black_box(match_shape(&dt, (M, N), &sp, 2, SingleCore));
     println!("Time elapsed: {:.2} ms", dur_as_ms(start.elapsed()));
     println!("Verification 1: {:?}", &res[..8]);
     println!("Verification 2: {:?}", &res[MID..MID + 8]);
@@ -56,7 +56,7 @@ fn match_multicore(_: &mut Bencher) {
     let sp = mock_shape(SHAPE_DIM);
     let dt = mock_dt();
     let start = Instant::now();
-    let res = black_box(match_shape(&dt, (M, N), &sp, 1, MultiCore));
+    let res = black_box(match_shape(&dt, (M, N), &sp, 2, MultiCore));
     println!("Time elapsed: {:.2} ms", dur_as_ms(start.elapsed()));
     println!("Verification 1: {:?}", &res[..8]);
     println!("Verification 2: {:?}", &res[MID..MID + 8]);
@@ -73,7 +73,7 @@ fn match_ocl(_: &mut Bencher) {
         for device in all_devices {
             let start = Instant::now();
             println!("{}", device.name());
-            let res = black_box(match_shape(&dt, (M, N), &sp, 1, GPU(&device, 256)));
+            let res = black_box(match_shape(&dt, (M, N), &sp, 2, GPU(&device, 256)));
             println!("Time elapsed: {:.2} ms", dur_as_ms(start.elapsed()));
             println!("Verification 1: {:?}", &res[..8]);
             println!("Verification 2: {:?}", &res[MID..MID + 8]);

@@ -2,11 +2,17 @@ use std::{i32, cmp};
 use rayon::prelude::*;
 
 #[cfg(feature="opencl")]
-use ocl::{core, Buffer, ProQue, Device, Program};
+use ocl::{core, Device, Buffer, ProQue, Program};
 
 #[cfg(not(feature="opencl"))]
 /// Dummy unused class to compile when ocl is not available.
 pub struct Device {}
+#[cfg(not(feature="opencl"))]
+impl Device {
+    pub fn name(&self) -> &'static str {
+        "Unimplemented"
+    }
+}
 
 pub enum Processor<'a> {
     SingleCore,
@@ -27,26 +33,6 @@ static OCL_MATCH_KERNEL: &'static str = r#"
         cm[idx] = acc;
     }
 "#;
-
-#[cfg(feature="opencl")]
-static OCL_SUPPRESS_KERNEL: &'static str = r#"
-    __kernel void suppress(const __global int* cm_in, __global int* cm_out,
-                           const int grid_height, const int grid_width, const int radius) {
-        int i = get_global_id(0);
-        int j = get_global_id(1);
-        int idx = i * grid_width + j;
-        int val = cm_in[idx];
-        cm_out[idx] = val;
-        for (int x = max(0, i - radius); x < min(grid_height, i + radius + 1); x++) {
-            for (int y = max(0, j - radius); y < min(grid_width, j + radius + 1); y++) {
-                if (cm_in[x * grid_width + y] < val) {
-                    cm_out[idx] = INT_MAX;
-                }
-            }
-        }
-    }
-"#;
-
 
 #[inline]
 fn match_kernel(i: usize, j: usize, grid_width: usize, sp: &[(i32, i32)], dt: &[i32]) -> i32 {
@@ -88,13 +74,6 @@ impl<'a> Processor<'a> {
                         cm[i * n + j] = match_kernel(i, j, n, sm, dt);
                     }
                 }
-                let mut cm_suppressed = vec![i32::MAX; n*m];
-                for i in 0..m - s {
-                    for j in 0..n - t {
-                        cm_suppressed[i * n + j] = suppress_kernel(&cm, dim, i as i32, j as i32, s_radius as i32);
-                    }
-                }
-                cm_suppressed
             }
             Processor::MultiCore => {
                 (0..m - s).collect::<Vec<_>>().par_iter().for_each(|&i| {
@@ -106,22 +85,22 @@ impl<'a> Processor<'a> {
                         }
                     }
                 });
-                let cm_suppressed = vec![i32::MAX; n*m];
-                // Do it again, but with suppression.
-                (0..m - s).collect::<Vec<_>>().par_iter().for_each(|&i| {
-                    unsafe {
-                        let ptr = cm_suppressed.as_ptr().offset((i * n) as isize) as *mut i32;
-                        for j in 0..n - t {
-                            *(ptr).offset(j as isize) = suppress_kernel(&cm, dim, i as i32, j as i32, s_radius as i32);
-                        }
-                    }
-                });
-                cm_suppressed
             }
             Processor::GPU(device, step_size) => {
-                Processor::process_opencl(device, step_size, dt, m, n, sm, s, t, s_radius, cm)
+                Processor::process_opencl(device, step_size, dt, m, n, sm, s, t, &mut cm);
             }
         }
+        let cm_suppressed = vec![i32::MAX; n*m];
+        // Do it again, but with suppression.
+        (0..m - s).collect::<Vec<_>>().par_iter().for_each(|&i| {
+            unsafe {
+                let ptr = cm_suppressed.as_ptr().offset((i * n) as isize) as *mut i32;
+                for j in 0..n - t {
+                    *(ptr).offset(j as isize) = suppress_kernel(&cm, dim, i as i32, j as i32, s_radius as i32);
+                }
+            }
+        });
+        cm_suppressed
     }
 
     #[cfg(not(feature="opencl"))]
@@ -133,10 +112,7 @@ impl<'a> Processor<'a> {
                       _: &[(i32, i32)],
                       _: usize,
                       _: usize,
-                      _: usize,
-                      cm: Vec<i32>)
-                      -> Vec<i32> {
-        cm
+                      _: &mut Vec<i32>) {
     }
 
     #[cfg(feature="opencl")]
@@ -148,14 +124,12 @@ impl<'a> Processor<'a> {
                       sm: &[(i32, i32)],
                       s: usize,
                       t: usize,
-                      s_radius: usize,
-                      mut cm: Vec<i32>)
-                      -> Vec<i32> {
+                      cm: &mut Vec<i32>) {
         // TODO: unwrap less
         let (xs, ys): (Vec<i32>, Vec<i32>) = sm.iter().cloned().unzip();
         let pro_que = ProQue::builder()
             .device(device)
-            .prog_bldr(Program::builder().src(OCL_MATCH_KERNEL).src(OCL_SUPPRESS_KERNEL))
+            .prog_bldr(Program::builder().src(OCL_MATCH_KERNEL))
             .build()
             .unwrap();
         let queue = pro_que.queue();
@@ -198,29 +172,8 @@ impl<'a> Processor<'a> {
             }
             queue.finish();
         }
-        // Here I'm re-using the distance transform input buffer as the output buffer for the
-        // suppression operation since they have the same size.
-        let kernel = pro_que.create_kernel("suppress")
-            .unwrap()
-            .arg_buf_named("cm_in", Some(&d_cm))
-            .arg_buf_named("cm_out", Some(&d_dt))
-            .arg_scl_named("grid_height", Some(m as i32))
-            .arg_scl_named("grid_width", Some(n as i32))
-            .arg_scl_named("radius", Some(s_radius as i32));
-        for i in 0..((m - s) / step_size) + 1 {
-            let offset = i * step_size;
-            if offset < m - s {
-                kernel.cmd()
-                    .gws((cmp::min(step_size, m - offset - s), n - t))
-                    .gwo((offset, 0))
-                    .enq()
-                    .unwrap();
-            }
-            queue.finish();
-        }
-        d_dt.read(&mut cm).enq().unwrap();
+        d_cm.read(cm).enq().unwrap();
         queue.finish();
-        cm
     }
 }
 

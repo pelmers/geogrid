@@ -9,7 +9,8 @@ use imagefmt::{ColFmt, ColType};
 use types::{Node, Bounds};
 
 pub use match_shape::{match_shape, Processor};
-
+#[cfg(not(feature="opencl"))]
+pub use match_shape::Device;
 
 /// Compute the length in meters of one degree latitude and longitude at given latitude degree.
 pub fn lat_lon(lat: f32) -> (f32, f32) {
