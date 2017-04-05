@@ -7,6 +7,7 @@ extern crate geogrid;
 
 use std::time::{Duration, Instant};
 use geogrid::util::*;
+use geogrid::util::Processor::*;
 
 #[cfg(test)]
 use test::{Bencher, black_box};
@@ -27,47 +28,65 @@ fn mock_shape(sz: usize) -> Vec<Vec<bool>> {
     sp
 }
 
+fn mock_dt() -> Vec<i32> {
+    // Compute distance transform of an identity matrix.
+    let grid = (0..M * N).map(|x| if x / N == x % N { 1 } else { 0 }).collect::<Vec<_>>();
+    l1dist_transform(&grid, (M, N))
+}
+
 fn dur_as_ms(dur: Duration) -> f64 {
     dur.as_secs() as f64 * 1000.0 + dur.subsec_nanos() as f64 / 1000_000.0
 }
-// test match of 40x40 shape on 9000x9000 maps.
+
 #[bench]
-fn bench_singlecore(_: &mut Bencher) {
+fn match_singlecore(_: &mut Bencher) {
     println!();
     let sp = mock_shape(SHAPE_DIM);
-    let dt = vec![2; M * N];
+    let dt = mock_dt();
     let start = Instant::now();
-    let res = black_box(match_shape_slow(&dt, (M, N), &sp));
+    let res = black_box(match_shape(&dt, (M, N), &sp, 1, SingleCore));
     println!("Time elapsed: {:.2} ms", dur_as_ms(start.elapsed()));
-    println!("Verification: {:?}", &res[MID..MID + 8]);
+    println!("Verification 1: {:?}", &res[..8]);
+    println!("Verification 2: {:?}", &res[MID..MID + 8]);
 }
 
 #[bench]
-fn bench_multicore(_: &mut Bencher) {
+fn match_multicore(_: &mut Bencher) {
     println!();
     let sp = mock_shape(SHAPE_DIM);
-    let dt = vec![2; M * N];
+    let dt = mock_dt();
     let start = Instant::now();
-    let res = black_box(match_shape(&dt, (M, N), &sp));
-    black_box(match_shape(&dt, (M, N), &sp));
+    let res = black_box(match_shape(&dt, (M, N), &sp, 1, MultiCore));
     println!("Time elapsed: {:.2} ms", dur_as_ms(start.elapsed()));
-    println!("Verification: {:?}", &res[MID..MID + 8]);
+    println!("Verification 1: {:?}", &res[..8]);
+    println!("Verification 2: {:?}", &res[MID..MID + 8]);
 }
 
 #[cfg(feature="opencl")]
 #[bench]
-fn bench_ocl(_: &mut Bencher) {
+fn match_ocl(_: &mut Bencher) {
     use ocl::builders::DeviceSpecifier;
     println!();
     let sp = mock_shape(SHAPE_DIM);
-    let dt = vec![2; M * N];
+    let dt = mock_dt();
     if let Ok(all_devices) = (DeviceSpecifier::All).to_device_list(None) {
         for device in all_devices {
             let start = Instant::now();
             println!("{}", device.name());
-            let res = black_box(match_shape_ocl(&dt, (M, N), &sp, &device, Some(256)));
+            let res = black_box(match_shape(&dt, (M, N), &sp, 1, GPU(&device, 256)));
             println!("Time elapsed: {:.2} ms", dur_as_ms(start.elapsed()));
-            println!("Verification: {:?}", &res[MID..MID + 8]);
+            println!("Verification 1: {:?}", &res[..8]);
+            println!("Verification 2: {:?}", &res[MID..MID + 8]);
         }
     }
+}
+
+#[bench]
+fn l1_dist(_: &mut Bencher) {
+    println!();
+    let start = Instant::now();
+    let res = black_box(mock_dt());
+    println!("Time elapsed: {:.2} ms", dur_as_ms(start.elapsed()));
+    println!("Verification 1: {:?}", &res[..8]);
+    println!("Verification 2: {:?}", &res[MID..MID + 8]);
 }

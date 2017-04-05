@@ -1,4 +1,4 @@
-use std::{f32, cmp};
+use std::{f32, cmp, i32};
 use std::io::Read;
 use std::path::Path;
 
@@ -8,9 +8,7 @@ use num::{Num, ToPrimitive};
 use imagefmt::{ColFmt, ColType};
 use types::{Node, Bounds};
 
-pub use match_shape::{match_shape_slow, match_shape};
-#[cfg(feature="opencl")]
-pub use match_shape::match_shape_ocl;
+pub use match_shape::{match_shape, Processor};
 
 
 /// Compute the length in meters of one degree latitude and longitude at given latitude degree.
@@ -124,4 +122,45 @@ pub fn mat_to_img<T: Clone + Ord + Num + ToPrimitive, P: AsRef<Path>>(t: &[T],
         .map(|v| (255.0 * (v + min) / range) as u8)
         .collect::<Vec<u8>>();
     ::imagefmt::write(p, n, m, ColFmt::Y, &bytes, ColType::Auto).expect("Error writing image file");
+}
+
+/// Compute L1 distance transform of t matrix with given dimensions.
+/// Output is linearized matrix of same size as grid.
+pub fn l1dist_transform(t: &[u8], dim: (usize, usize)) -> Vec<i32> {
+    let (m, n) = dim;
+    let mut dt = vec![(m*n+1) as i32; n*m];
+    for i in 0..m {
+        let off = i * n;
+        for j in 0..n {
+            if t[off + j] > 0 {
+                dt[off + j] = 0;
+            } else {
+                // Let val be min of current, (left, and above) + 1
+                let mut val = dt[off + j];
+                if j > 0 {
+                    val = cmp::min(val, dt[off + j - 1] + 1);
+                }
+                if i > 0 {
+                    val = cmp::min(val, dt[off - n + j] + 1);
+                }
+                dt[off + j] = val;
+            }
+        }
+    }
+    // Second pass, reverse order
+    for i in (0..m).rev() {
+        let off = i * n;
+        for j in (0..n).rev() {
+            // take min of current, (right, and below) + 1
+            let mut val = dt[off + j];
+            if j < n - 1 {
+                val = cmp::min(val, dt[off + j + 1] + 1);
+            }
+            if i < m - 1 {
+                val = cmp::min(val, dt[off + j + n] + 1);
+            }
+            dt[off + j] = val;
+        }
+    }
+    dt
 }

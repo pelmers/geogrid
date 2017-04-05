@@ -9,7 +9,7 @@ extern crate serde_derive;
 #[cfg(feature="opencl")]
 extern crate ocl;
 
-use std::{f32, i32, cmp};
+use std::{f32, i32};
 
 mod types;
 pub use types::*;
@@ -218,6 +218,7 @@ impl GeoGrid {
 
     /// Return lat, lon coordinates of given index in the grid.
     pub fn to_lat_lon(&self, idx: usize) -> (f32, f32) {
+        // TODO: account for latitude rounding error
         let (lat_len, lon_len) = lat_lon((self.bounds.south + self.bounds.north) / 2.0);
         let row = (idx / self.grid_width) as f32;
         let col = (idx % self.grid_width) as f32;
@@ -227,6 +228,7 @@ impl GeoGrid {
 
     /// Return closest index in grid to given latitude, longitude.
     pub fn near_lat_lon(&self, lat: f32, lon: f32) -> usize {
+        // TODO: account for latitude rounding error
         let (ra, ri) = self.degree_resolution();
         let lat_offset = ((self.bounds.north - lat) / ra).round() as usize;
         let lon_offset = ((lon - self.bounds.west) / ri).round() as usize;
@@ -254,41 +256,6 @@ impl GeoGrid {
     /// Compute L1 distance transform of t matrix.
     /// Output is linearized matrix of same size as grid.
     pub fn l1dist_transform(&self) -> Vec<i32> {
-        let (m, n) = self.size();
-        let mut dt = vec![(m*n+1) as i32; n*m];
-        for i in 0..m {
-            let off = i * n;
-            for j in 0..n {
-                if self.grid[off + j] > 0 {
-                    dt[off + j] = 0;
-                } else {
-                    // Let val be min of current, (left, and above) + 1
-                    let mut val = dt[off + j];
-                    if j > 0 {
-                        val = cmp::min(val, dt[off + j - 1] + 1);
-                    }
-                    if i > 0 {
-                        val = cmp::min(val, dt[off - n + j] + 1);
-                    }
-                    dt[off + j] = val;
-                }
-            }
-        }
-        // Second pass, reverse order
-        for i in (0..m).rev() {
-            let off = i * n;
-            for j in (0..n).rev() {
-                // take min of current, (right, and below) + 1
-                let mut val = dt[off + j];
-                if j < n - 1 {
-                    val = cmp::min(val, dt[off + j + 1] + 1);
-                }
-                if i < m - 1 {
-                    val = cmp::min(val, dt[off + j + n] + 1);
-                }
-                dt[off + j] = val;
-            }
-        }
-        dt
+        util::l1dist_transform(&self.grid, self.size())
     }
 }

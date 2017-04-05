@@ -1,6 +1,6 @@
 [package]
 name = "geogrid"
-version = "0.2.1"
+version = "0.3.0"
 authors = ["Peter Elmers <peter.elmers@yahoo.com>"]
 description = "Manipulate geographic data on a grid."
 license = "MIT"
